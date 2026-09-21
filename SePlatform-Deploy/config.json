@@ -1,0 +1,15 @@
+{
+  "defaultArchive": "X:\\HMI 2.0.38.zip",
+  "logRoot": "C:\\ProgramData\\SePlatform\\Deployment",
+  "tempRoot": "$env:TEMP\\SePlatform-Deploy",
+  "localePreference": ["ru_RU", "ru", "en_US", "en"],
+  "preferArch": "x64",
+  "keepTempOnError": false,
+  "cleanupTempOnSuccess": true,
+  "msiexecTimeoutSeconds": 900,
+  "uninstallTimeoutSeconds": 600,
+  "installTimeoutSeconds": 900,
+  "warnOnNewerVersion": true,
+  "continueOnComponentError": true,
+  "requireAdmin": true
+}
