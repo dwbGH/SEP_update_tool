@@ -6,6 +6,50 @@ function Write-Banner {
     Write-Host ''
 }
 
+function Ask-StartupMode {
+    param([string]$DefaultArchive = '')
+    Write-Host ''
+    Write-Host 'SePlatform Deploy Tool'
+    Write-Host '======================'
+    Write-Host ''
+    Write-Host 'What do you want to do?'
+    Write-Host ''
+    Write-Host '  [1] Install/update components from ZIP archive (MSI)'
+    Write-Host '  [2] Manage additional SePlatform.Data Server copies (services)'
+    Write-Host '  [3] Exit'
+    Write-Host ''
+    while ($true) {
+        Write-Host -NoNewline 'Select (1, 2 or 3): '
+        $input = (Read-Host).Trim()
+        switch ($input) {
+            '1' {
+                $archive = $null
+                while ($true) {
+                    if ($DefaultArchive) {
+                        Write-Host -NoNewline ('Path to ZIP archive [default: ' + $DefaultArchive + ']: ')
+                        $input = (Read-Host).Trim()
+                        if ($input) { $archive = $input } else { $archive = $DefaultArchive }
+                    } else {
+                        Write-Host -NoNewline 'Path to ZIP archive: '
+                        $input = (Read-Host).Trim()
+                        $archive = $input
+                    }
+                    if ([string]::IsNullOrWhiteSpace($archive)) {
+                        Write-Host 'Archive path cannot be empty.' -ForegroundColor Yellow
+                        continue
+                    }
+                    if (Test-Path $archive) { break }
+                    Write-Host ('Archive not found: ' + $archive) -ForegroundColor Yellow
+                }
+                return [pscustomobject]@{ Mode = 'COMPONENTS'; Archive = $archive }
+            }
+            '2' { return [pscustomobject]@{ Mode = 'SERVER_COPIES'; Archive = '' } }
+            '3' { return [pscustomobject]@{ Mode = 'EXIT'; Archive = '' } }
+            default { Write-Host 'Please enter 1, 2 or 3.' -ForegroundColor Yellow }
+        }
+    }
+}
+
 function Show-Plan {
     param([object[]]$Actions)
     Write-Host 'Archive: ' $script:Deployment.ArchivePath
@@ -88,6 +132,15 @@ function Show-Plan {
             Write-Host $line
         }
         Write-Host ''
+    }
+
+    try {
+        $serverInstances = Get-SePlatformServerInstances
+        if ($serverInstances.Count -gt 0) {
+            Show-ServerInstancesTable $serverInstances
+        }
+    } catch {
+        Write-Log ('Server copies detection failed: ' + $_.Exception.Message) -Level 'WARN'
     }
 }
 

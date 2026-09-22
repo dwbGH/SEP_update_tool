@@ -9,6 +9,7 @@ param(
     [switch]$AutoApprove,
     [switch]$Uninstall,
     [switch]$UpdateOnly,
+    [switch]$ServerCopies,
     [string]$Locale = ''
 )
 
@@ -17,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $scriptRoot) { $scriptRoot = (Get-Location).Path }
 
-foreach ($m in @('Core.ps1', 'Logging.ps1', 'Versioning.ps1', 'Manifest.ps1', 'Catalog.ps1', 'Inventory.ps1', 'Dependencies.ps1', 'Installer.ps1', 'Uninstaller.ps1', 'Verification.ps1', 'UI.ps1')) {
+foreach ($m in @('Core.ps1', 'Logging.ps1', 'Versioning.ps1', 'Manifest.ps1', 'Catalog.ps1', 'Inventory.ps1', 'Dependencies.ps1', 'Installer.ps1', 'Uninstaller.ps1', 'Verification.ps1', 'UI.ps1', 'ServerCopies.ps1')) {
     $mod = Join-Path $scriptRoot ('modules\' + $m)
     if (-not (Test-Path $mod)) {
         Write-Host ('ERROR: Required module not found: ' + $mod) -ForegroundColor Red
@@ -31,6 +32,7 @@ $script:Deployment.NonInteractive = [bool]$NonInteractive
 $script:Deployment.AutoApprove = [bool]$AutoApprove
 $script:Deployment.Uninstall = [bool]$Uninstall
 $script:Deployment.UpdateOnly = [bool]$UpdateOnly
+$script:Deployment.ServerCopies = [bool]$ServerCopies
 
 function Resolve-ScriptRelativePath {
     param([string]$Path)
@@ -76,6 +78,55 @@ try {
 
     $manifestObj = Load-Manifest $manifestPath
     $script:Deployment.Manifest = $manifestObj
+
+    $interactiveStartup = ($script:Deployment.Uninstall -eq $false) -and
+        ($script:Deployment.UpdateOnly -eq $false) -and
+        ($script:Deployment.ServerCopies -eq $false) -and
+        ($script:Deployment.NonInteractive -eq $false) -and
+        ($script:Deployment.WhatIf -eq $false) -and
+        (-not $Archive)
+    if ($interactiveStartup) {
+        $startupArchive = ''
+        if ($cfg.PSObject.Properties['defaultArchive'] -and $cfg.defaultArchive) {
+            $startupArchive = [string]$cfg.defaultArchive
+        }
+        $choice = Ask-StartupMode -DefaultArchive $startupArchive
+        if ($choice.Mode -eq 'EXIT') {
+            Write-Host 'Exiting.' -ForegroundColor Yellow
+            exit $script:EXIT_ABORTED
+        }
+        if ($choice.Mode -eq 'SERVER_COPIES') {
+            $script:Deployment.ServerCopies = $true
+            $Archive = ''
+        } else {
+            $Archive = $choice.Archive
+        }
+    }
+
+    if ($Script:Deployment.ServerCopies) {
+        $baseLogRoot = if ($LogPath) { $LogPath } else { if ($cfg.PSObject.Properties['logRoot']) { [string]$cfg.logRoot } else { 'C:\ProgramData\SePlatform\Deployment' } }
+        $null = New-LogSession -BaseRoot $baseLogRoot -ArchiveName 'ServerCopies' -WhatIf:$script:Deployment.WhatIf -NonInteractive:$script:Deployment.NonInteractive
+        Write-Log 'Mode: SERVER_COPIES'
+        Manage-AdditionalServerCopies
+        $script:Deployment.Results = @($script:Deployment.Products)
+        $hasFailed = $script:Deployment.CountFailed -gt 0
+        $exit = if ($hasFailed) { $script:EXIT_ERRORS } else { $script:EXIT_OK }
+        $resultName = if ($hasFailed) { 'COMPLETED_WITH_ERRORS' } else { 'SUCCESS' }
+        $null = Save-Report -ExitCode $exit -Result $resultName
+        Show-Summary -Results $script:Deployment.Results -ExitCode $exit
+        if ($script:ServerCopiesState.Results.Count -gt 0) {
+            Write-Host 'Server copies actions:'
+            Write-Host ''
+            foreach ($r in $script:ServerCopiesState.Results) {
+                $marker = if ($r.Status -eq 'OK') { '[OK]' } else { '[INFO]' }
+                if ($r.Status -eq 'PENDING') { $marker = '[PLANNED]' }
+                Write-Host ($marker + ' ' + $r.Action + ' ' + $r.FolderName + '  service=' + $r.ServiceName)
+            }
+            Write-Host ''
+        }
+        Write-Host ('Report: ' + $script:Deployment.ReportFile)
+        exit $exit
+    }
 
     $archivePath = $Archive
     if ([string]::IsNullOrWhiteSpace($archivePath)) {

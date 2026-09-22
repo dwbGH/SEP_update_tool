@@ -64,9 +64,50 @@ function Save-Report {
         }
         products    = @($script:Deployment.Results)
     }
+    $null = Add-ServerCopiesToReport -Report $report
     $json = $report | ConvertTo-Json -Depth 6
     $reportFile = Join-Path $script:Deployment.SessionDir 'report.json'
     $json | Out-File -FilePath $reportFile -Encoding UTF8
     $script:Deployment.ReportFile = $reportFile
     return $reportFile
+}
+
+function Add-ServerCopiesToReport {
+    param($Report)
+    $inventory = @()
+    $actions = @()
+    try {
+        if (Get-Command Get-SePlatformServerInstances -ErrorAction SilentlyContinue) {
+            $detected = Get-SePlatformServerInstances
+            $inventory = @($detected | ForEach-Object {
+                [ordered]@{
+                    folder      = $_.FolderPath
+                    serviceName = $_.ServiceName
+                    port        = $_.Port
+                    instanceId  = $_.InstanceId
+                    isMain      = $_.IsMain
+                    state       = $_.ServiceState
+                    hasInstaller = $_.HasInstaller
+                }
+            })
+        }
+    } catch {
+        $inventory = @()
+    }
+    if ($null -ne $script:ServerCopiesState -and $script:ServerCopiesState.Results.Count -gt 0) {
+        $actions = @($script:ServerCopiesState.Results | ForEach-Object {
+            [ordered]@{
+                action      = $_.Action
+                status      = $_.Status
+                folder      = if ($_.FolderName) { $_.FolderName } else { '' }
+                serviceName = if ($_.ServiceName) { $_.ServiceName } else { '' }
+                port        = if ($null -ne $_.Port) { $_.Port } else { '' }
+                instanceId  = if ($_.InstanceId) { $_.InstanceId } else { '' }
+                error       = if ($_.Error) { $_.Error } else { '' }
+            }
+        })
+    }
+    $Report['serverCopiesDetected'] = $inventory
+    $Report['serverCopiesActions'] = $actions
+    return $Report
 }

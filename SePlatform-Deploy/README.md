@@ -63,6 +63,7 @@ SePlatform-Deploy/
     ├── Dependencies.ps1  # проверка зависимостей (.NET, Python)
     ├── Installer.ps1     # установка через msiexec
     ├── Uninstaller.ps1   # удаление старых версий и остановка служб
+    ├── ServerCopies.ps1  # управление дополнительными копиями SePlatform.Data Server
     ├── Verification.ps1  # проверка результата
     └── UI.ps1            # план, запросы, сводка
 ```
@@ -83,6 +84,35 @@ SePlatform-Deploy/
 cd "C:\Users\dwbpr\Desktop\SEP_update_tool\SePlatform-Deploy"
 .\Deploy.ps1 -Archive "X:\HMI 2.0.38.zip"
 ```
+
+### Запуск без опций (мастер выбора)
+
+Если запустить `.\Deploy.ps1` без параметров, показывается мастер, в котором можно
+вручную выбрать, что делать:
+
+```
+SePlatform Deploy Tool
+======================
+
+What do you want to do?
+
+  [1] Install/update components from ZIP archive (MSI)
+  [2] Manage additional SePlatform.Data Server copies (services)
+  [3] Exit
+
+Select (1, 2 or 3):
+```
+
+- **1** — обновление компонентов из архива: далее запрашивается путь к ZIP
+  (предлагается путь из `defaultArchive`, его можно принять или ввести другой;
+  путь проверяется до продолжения);
+- **2** — управление дополнительными копиями SePlatform.Data Server (меню
+  установки/обновления/удаления копий, без архива);
+- **3** — выход.
+
+Мастер не показывается, если задан хотя бы один параметр режима
+(`-Archive`, `-ServerCopies`, `-Uninstall`, `-UpdateOnly`, `-WhatIf`,
+`-AutoApprove`, `-NonInteractive`).
 
 ### Сухой прогон (без изменений)
 
@@ -107,6 +137,7 @@ cd "C:\Users\dwbpr\Desktop\SEP_update_tool\SePlatform-Deploy"
 | `-NonInteractive` | Без интерактивных запросов (полезно для автономного запуска). |
 | `-UpdateOnly` | Обновить только установленные компоненты; отсутствующие не устанавливаются. |
 | `-Uninstall`  | Режим удаления установленных компонентов. |
+| `-ServerCopies` | Управление дополнительными копиями (службами) SePlatform.Data Server: установка, обновление, удаление, повторное обнаружение. Не требует архива MSI. |
 | `-KeepTemp`   | Не удалять временную директорию с MSI после запуска. |
 
 > **Внимание:** `-NonInteractive` без `-AutoApprove` работает в режиме
@@ -139,6 +170,118 @@ Deployment mode:
 
 В режимах `-Uninstall` / `-UpdateOnly` без `-AutoApprove` тоже предлагается
 выбор по номерам.
+
+---
+
+## Дополнительные копии SePlatform.Data Server
+
+На одной машине могут работать несколько экземпляров сервера данных: основная
+служба (устанавливается/обновляется штатным MSI-развёртыванием) и дополнительные
+копии, создаваемые по разделу 4.3 документации («Дополнительные службы
+SePlatform.Data Server»).
+
+Режим `-ServerCopies` не требует архива MSI и работает только с установленными
+копиями на машине:
+
+```powershell
+.\Deploy.ps1 -ServerCopies
+```
+
+### Обнаружение
+
+При каждом запуске (в том числе в `-WhatIf`) инструмент сканирует корневую папку
+`serverRoot` из `config.json` (по умолчанию `C:\Program Files\SePlatform`) и
+находит каталоги SePlatform.Data Server по имени папки и наличию
+`Server\SePlatform.Server.exe` + `Server\SePlatform.Server.xml`. Из конфигурации
+читаются: имя службы (`install.ServiceName`), порт (`Connection.Port`),
+идентификатор экземпляра и COM-прокси (OPCDA/OPCAE/HDA). Идентификатор
+экземпляра берётся в первую очередь из
+`Server\SePlatform.Server.json` (новые версии, ключ `Instance.Id`), а если
+файла нет — из `Instance.ID` конфигурации XML (старые версии).
+
+Основная служба — это каталог, чьё имя совпадает с `serverCopies.mainFolder`
+(`SePlatform.Server`). Она управляется только штатным развёртыванием и не может
+быть удалена/переустановлена в этом режиме.
+
+### Меню
+
+```
+[1] Install a new additional copy      — первичная установка новой копии
+[2] Update additional copies           — обновление бинарников всех копий
+[3] Remove additional copies           — удаление копий
+[4] Rescan                             — повторное обнаружение
+[5] Exit                               — выход
+```
+
+- **Установка копии [1]:** копируется каталог основной службы в новую папку
+  (`SePlatform.Server` → `SePlatform.Server<N>`). Перед копированием служба
+  источника останавливается (чтобы не было блокировки рабочих файлов, например
+  `SePlatformServer.cfg`), после операции служба источника запускается обратно.
+  Далее:
+  - в `Server\SePlatform.Server.xml` копии переписываются `ServiceName`,
+    `Connection.Port` (а также `Instance.ID`, если в новой версии этот
+    атрибут ещё есть), и `ProgID`/`CLSID` COM-прокси (базовый ProgID
+    с числовым суффиксом; отключается параметром `disableProgIdRewrite`);
+  - новый идентификатор экземпляра всегда записывается в
+    `Server\SePlatform.Server.json` (ключ `Instance.Id`), файл создаётся при
+    необходимости;
+  - служба копии регистрируется: `SePlatform.ServerInstaller.exe /install` из
+    папки `Server` копии, затем запускается.
+  - Новый порт и номер подбираются автоматически (первый свободный), при желании
+    их можно указать. Имя службы, порт и ID проверяются на уникальность.
+- **Обновление копий [2]:** служба источника и службы обновляемых копий
+  временно останавливаются, бинарники из `Server` основной службы
+  синхронизируются в `Server` каждой копии. Конфигурационные файлы копии
+  (`SePlatform.Server.xml` и `SePlatform.Server.json`) не перезаписываются.
+  При обновлении со старой версии на новую идентификатор экземпляра копии
+  переносится из XML в `SePlatform.Server.json` (`Instance.Id`), а старый
+  `Instance.ID` в XML **комментируется** (не удаляется). Затем копия
+  перерегистрируется, службы источника и копий запускаются обратно.
+- **Удаление копий [3]:** копии останавливаются, регистрация снимается
+  (`/uninstall`, резервный вариант — `sc.exe delete`), каталог удаляется.
+  Основная служба в списке отсутствует. Защита: действие над службой (`stop`,
+  `/uninstall`, `sc.exe delete`) выполняется только в том случае, если
+  `ImagePath` этой службы действительно указывает на каталог данной копии
+  (`SePlatform.Server<N>\Server\...`). Если копия частичная (например, осталась
+  после прерванной установки) и её конфиг содержит имя службы основной —
+  такая служба не останавливается и не удаляется, удаляется только сам каталог
+  копии. Это исключает случайное удаление службы основной SePlatform.Data
+  Server.
+
+В каждом пункте выводится список с номерами: `A` — все, `N` — ничего, либо номера
+через запятую/пробел. Операции защищены подтверждением.
+
+### Конфигурация (`config.json`)
+
+```json
+"serverCopies": {
+    "serverRoot": "C:\\Program Files\\SePlatform",
+    "mainFolder": "SePlatform.Server",
+    "serverSubDir": "Server",
+    "exeName": "SePlatform.Server.exe",
+    "installerExeName": "SePlatform.ServerInstaller.exe",
+    "configFileName": "SePlatform.Server.xml",
+    "jsonConfigFileName": "SePlatform.Server.json",
+    "disableProgIdRewrite": false
+}
+```
+
+- `serverRoot` — корневая папка, где лежат каталоги серверов;
+- `mainFolder` — имя каталога основной службы;
+- `serverSubDir` — подкаталог с бинарниками (`Server`);
+- `exeName` / `installerExeName` — исполняемые файлы сервера и установщика службы;
+- `configFileName` — файл конфигурации копии (XML);
+- `jsonConfigFileName` — файл конфигурации экземпляра новых версий (JSON,
+  `Instance.Id`);
+- `disableProgIdRewrite` — `false` (по умолчанию): ProgID/CLSID COM-прокси копии
+  переписываются на уникальные; `true`: оставить базовые ProgID.
+
+Тайм-аут операций с установщиком копии задаётся параметром
+`serverCopyTimeoutSeconds` (по умолчанию 900).
+
+Список обнаруженных копий попадает в план и `report.json` (ключи
+`serverCopiesDetected` / `serverCopiesActions`), а операции логируются в директорию
+сессии.
 
 ---
 
@@ -295,6 +438,10 @@ exit-коды, результат проверки, ошибку.
 - Удалить выборочно (список с номерами):
   ```powershell
   .\Deploy.ps1 -Archive "X:\HMI 2.0.38.zip" -Uninstall
+  ```
+- Управление дополнительными копиями SePlatform.Data Server (без архива):
+  ```powershell
+  .\Deploy.ps1 -ServerCopies
   ```
 
 ---

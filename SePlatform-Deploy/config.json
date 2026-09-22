@@ -11,5 +11,16 @@
   "installTimeoutSeconds": 900,
   "warnOnNewerVersion": true,
   "continueOnComponentError": true,
-  "requireAdmin": true
+  "requireAdmin": true,
+  "serverCopyTimeoutSeconds": 900,
+  "serverCopies": {
+    "serverRoot": "C:\\Program Files\\SePlatform",
+    "mainFolder": "SePlatform.Server",
+    "exeName": "SePlatform.Server.exe",
+    "installerExeName": "SePlatform.ServerInstaller.exe",
+    "configFileName": "SePlatform.Server.xml",
+    "jsonConfigFileName": "SePlatform.Server.json",
+    "serverSubDir": "Server",
+    "disableProgIdRewrite": false
+  }
 }
