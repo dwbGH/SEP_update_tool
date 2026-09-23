@@ -25,12 +25,13 @@ svc_unit() { printf '%s.service' "${1,,}"; }
 
 xml_attr() {
     local file="$1" elem="$2" attr="$3"
-    grep -oP "<${elem}[^>]*${attr}=\"\K[^\"]*" "$file" 2>/dev/null | head -n1
+    grep -oiP "<${elem}[^>]*${attr}[[:space:]]*=[[:space:]]*\"\K[^\"]*" "$file" 2>/dev/null | head -n1
 }
 
 set_xml_attr() {
     local file="$1" elem="$2" attr="$3" value="$4"
-    sed -i -E "s|(<${elem}[^>]*${attr}=\")[^\"]*|\\1${value}|" "$file" 2>/dev/null
+    grep -qiP "<${elem}[^>]*${attr}[[:space:]]*=[[:space:]]*\"" "$file" 2>/dev/null || return 1
+    sed -i -E "s|(<${elem}[^>]*${attr}[[:space:]]*=[[:space:]]*\")[^\"]*|\1${value}|I" "$file"
 }
 
 json_read_id() {
@@ -49,13 +50,15 @@ json_write_id() {
     fi
     if grep -q '"Instance"' "$file"; then
         if grep -q '"Id"' "$file"; then
-            sed -i -E "s|(\"Id\"\s*:\s*\")[^\"]*|\\1${id}|" "$file"
+            sed -i -E "s|(\"Id\"[[:space:]]*:[[:space:]]*\")[^\"]*|\1${id}|" "$file"
+        elif grep -q '"Instance"[[:space:]]*:[[:space:]]*{}' "$file"; then
+            sed -i -E "s|\"Instance\"[[:space:]]*:[[:space:]]*\{\}|\"Instance\": { \"Id\": \"${id}\" }|" "$file"
         else
-            sed -i -E "s|(\"Instance\"\s*:\s*\{)|\1 \"Id\": \"${id}\"|" "$file"
+            sed -i -E "s|(\"Instance\"[[:space:]]*:[[:space:]]*\{)|\1 \"Id\": \"${id}\",|" "$file"
         fi
     else
         local ver
-        ver=$(grep -oP '"Version"\s*:\s*\K[0-9]+' "$file" | head -n1)
+        ver=$(grep -oP '"Version"[[:space:]]*:[[:space:]]*\K[0-9]+' "$file" | head -n1)
         [ -n "$ver" ] || ver=0
         printf '{\n  "Version": %s,\n  "Instance": {\n    "Id": "%s"\n  }\n}\n' "$ver" "$id" > "$file"
     fi
@@ -179,7 +182,9 @@ next_number() {
 }
 
 used_ports() {
-    (ss -H -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -oP '\d+$' 2>/dev/null | sort -u
+    local raw
+    raw=$(ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null)
+    printf '%s\n' "$raw" | awk 'NR==1 && /State|Proto/{next} {n=split($4,a,":"); print a[n]}' 2>/dev/null | sort -un
 }
 
 free_port() {
@@ -327,17 +332,28 @@ install_copy() {
         return 1
     fi
 
+    local main_active=0
+    if systemctl is-active --quiet "$main_unit" 2>/dev/null; then
+        main_active=1
+        log "Stopping service: $main_unit"
+        systemctl stop "$main_unit" 2>/dev/null || warn "cannot stop $main_unit"
+    fi
+
     log "Copying server folder: $SRC_FOLDER -> $target"
     if ! cp -R "$SRC_FOLDER" "$target"; then
         fail 'copy failed'
+        [ "$main_active" -eq 1 ] && { systemctl start "$main_unit" >/dev/null 2>&1 || warn "cannot start $main_unit"; }
         return 1
     fi
+    [ "$main_active" -eq 1 ] && { systemctl start "$main_unit" >/dev/null 2>&1 || warn "cannot start $main_unit"; log "Service started: $main_unit"; }
 
     if ! set_xml_attr "$target/$XML_NAME" install ServiceName "$svc_name"; then
-        fail 'cannot edit ServiceName in config XML'
+        fail "cannot edit install/ServiceName in $target/$XML_NAME"
+        return 1
     fi
     if ! set_xml_attr "$target/$XML_NAME" Connection Port "$port"; then
-        fail 'cannot edit Port in config XML'
+        fail "cannot edit Connection/Port in $target/$XML_NAME"
+        return 1
     fi
     set_xml_attr "$target/$XML_NAME" Instance ID "$inst_id"
     json_write_id "$target/$JSON_NAME" "$inst_id"
@@ -402,6 +418,14 @@ update_copies() {
     local new_style=0
     [ -f "$src_dir/$JSON_NAME" ] && new_style=1
 
+    local src_unit src_active=0
+    src_unit=$(svc_unit "$src_svc")
+    if systemctl is-active --quiet "$src_unit" 2>/dev/null; then
+        src_active=1
+        log "Stopping service: $src_svc"
+        systemctl stop "$src_unit" 2>/dev/null || warn "cannot stop $src_unit"
+    fi
+
     local idx copy copy_name copy_port copy_svc copy_id state unit
     for idx in "${SELECTED[@]}"; do
         copy="${copies[$idx]}"
@@ -428,7 +452,7 @@ update_copies() {
         else
             tar -C "$src_dir" -cf - --exclude="$XML_NAME" --exclude="$JSON_NAME" . 2>/dev/null | tar -C "$copy_dir" -xf - 2>/dev/null
         fi
-        log 'Binaries synced from ' "$src_dir"
+        log "Binaries synced from $src_dir"
 
         if [ "$new_style" -eq 1 ]; then
             if [ -n "$copy_instance_id" ]; then
@@ -445,17 +469,20 @@ update_copies() {
             log 'Main server uses legacy (XML) config; instance ID left in XML'
         fi
 
+        systemctl enable "$unit" 2>/dev/null
         if [ "$start_after" -eq 1 ]; then
-            systemctl enable "$unit" 2>/dev/null
-            systemctl restart "$unit" 2>/dev/null
+            systemctl restart "$unit" 2>/dev/null || warn "cannot restart $unit"
             log "Service started: $copy_svc"
         else
-            systemctl enable "$unit" 2>/dev/null
-            systemctl start "$unit" 2>/dev/null
-            log "Service enabled/started: $copy_svc"
+            log "Service left stopped (was inactive): $copy_svc"
         fi
         ok "Updated: $copy_name"
     done
+
+    if [ "$src_active" -eq 1 ]; then
+        systemctl start "$src_unit" >/dev/null 2>&1 || warn "cannot start $src_unit"
+        log "Service started: $src_svc"
+    fi
 }
 
 remove_copies() {

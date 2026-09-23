@@ -1,0 +1,16 @@
+{
+  "defaultArchive": "",
+  "logRoot": "/var/log/SePlatform/Deployment",
+  "tempRoot": "/tmp/SePlatform-Deploy",
+  "localePreference": ["ru_RU", "ru", "en_US", "en"],
+  "preferArch": ["amd64", "x86_64", "all", "any"],
+  "keepTempOnError": false,
+  "cleanupTempOnSuccess": true,
+  "installTimeoutSeconds": 1800,
+  "uninstallTimeoutSeconds": 600,
+  "warnOnNewerVersion": true,
+  "continueOnComponentError": true,
+  "requireRoot": true,
+  "installWithApt": false,
+  "purgeOnUninstall": false
+}

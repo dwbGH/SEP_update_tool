@@ -6,6 +6,10 @@
 Инструмент не требует Git, Ansible или внешних систем. Единственный вход — ZIP-архив с
 дистрибутивами и этот проект, скопированный на машину.
 
+> **Linux:** компоненты SePlatform на Linux развёртываются `.deb`-пакетами —
+> см. [linux/README.md](linux/README.md) (`Deploy.sh` для установки/обновления/удаления
+> `.deb` и `ServerCopies.sh` для дополнительных копий SePlatform.Data Server).
+
 ---
 
 ## Назначение
@@ -66,6 +70,18 @@ SePlatform-Deploy/
     ├── ServerCopies.ps1  # управление дополнительными копиями SePlatform.Data Server
     ├── Verification.ps1  # проверка результата
     └── UI.ps1            # план, запросы, сводка
+
+linux/                       # Linux-версия (.deb)
+    ├── Deploy.sh            # установка/обновление/удаление .deb-компонентов
+    ├── ServerCopies.sh      # дополнительные копии SePlatform.Data Server (systemd)
+    ├── manifest-linux.json  # whitelist компонентов (.deb)
+    ├── config-linux.json    # настройки по умолчанию (Linux)
+    ├── README.md
+    └── lib/
+        ├── common.sh        # коды выхода, логирование, JSON, ввод, отчёт
+        ├── catalog.sh       # анализ ZIP/папки и выбор .deb-кандидатов
+        ├── inventory.sh     # инвентаризация по dpkg
+        └── ops.sh           # dpkg install/remove, systemd, процессы
 ```
 
 ---
