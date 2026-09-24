@@ -161,7 +161,16 @@
       "localePreference": ["ru_RU", "ru", "en_US", "en"],
       "order": 31,
       "services": ["seplatform.hmi-webviewer"],
-      "processes": ["seplatform.hmi-webviewer"]
+      "processes": ["seplatform.hmi-webviewer"],
+      "dependencies": [
+        {
+          "kind": "command",
+          "package": "python3",
+          "minVersion": "",
+          "description": "Python 3 (требование веб-компонентов HMI)",
+          "blocking": true
+        }
+      ]
     },
     {
       "id": "HMI.AdminConsole",
@@ -211,7 +220,16 @@
       "localePreference": ["ru_RU", "ru", "en_US", "en"],
       "order": 43,
       "services": [],
-      "processes": []
+      "processes": [],
+      "dependencies": [
+        {
+          "kind": "command",
+          "package": "python3",
+          "minVersion": "",
+          "description": "Python 3 (требование веб-компонентов HMI)",
+          "blocking": true
+        }
+      ]
     },
     {
       "id": "HMI.CommonLib",
@@ -271,7 +289,16 @@
       "archCode": "amd64",
       "order": 48,
       "services": [],
-      "processes": []
+      "processes": [],
+      "dependencies": [
+        {
+          "kind": "command",
+          "package": "python3",
+          "minVersion": "",
+          "description": "Python 3 (требование веб-компонентов HMI)",
+          "blocking": true
+        }
+      ]
     },
     {
       "id": "HMI.IntegrityControl",
@@ -309,7 +336,16 @@
       "localePreference": ["ru_RU", "ru", "en_US", "en"],
       "order": 51,
       "services": [],
-      "processes": []
+      "processes": [],
+      "dependencies": [
+        {
+          "kind": "command",
+          "package": "python3",
+          "minVersion": "",
+          "description": "Python 3 (требование веб-компонентов HMI)",
+          "blocking": true
+        }
+      ]
     },
     {
       "id": "HMI.SecurityConfigurator",
@@ -383,7 +419,16 @@
       "localePreference": ["ru_RU", "ru", "en_US", "en"],
       "order": 57,
       "services": [],
-      "processes": []
+      "processes": [],
+      "dependencies": [
+        {
+          "kind": "command",
+          "package": "python3",
+          "minVersion": "",
+          "description": "Python 3 (требование веб-компонентов HMI)",
+          "blocking": true
+        }
+      ]
     },
     {
       "id": "HMI.Trends",

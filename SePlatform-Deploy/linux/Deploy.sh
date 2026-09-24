@@ -102,6 +102,18 @@ for tool in bash dpkg dpkg-query dpkg-deb python3; do
     command -v "$tool" >/dev/null 2>&1 || fatal "required tool not found: $tool"
 done
 
+check_python3() {
+    # скрипты используют stdlib Python 3 (json, argparse-подобные heredoc-парсеры)
+    local v
+    v=$(python3 --version 2>&1) || { err 'python3 is not runnable'; return 1; }
+    case "$v" in
+        Python\ 3.*) return 0 ;;
+    esac
+    err "Python 3 required, found: $v"
+    return 1
+}
+check_python3 || exit $EXIT_BAD_PARAMS
+
 require_root_safe() {
     if [ "${DRY_RUN}" -ne 1 ] && [ "$(cfg_bool requireRoot 1)" = '1' ]; then
         if [ "$(id -u)" -ne 0 ]; then
