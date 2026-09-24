@@ -6,13 +6,13 @@ dpkg_inventory() {
     INV_PKG=(); INV_VER=(); INV_ARCH=(); INV_STATUS=()
     command -v dpkg-query >/dev/null 2>&1 || fatal 'dpkg-query not found; is this a Debian/Ubuntu system?'
     local line p v a s
-    while IFS=$'\x1f' read -r p v a s; do
+    while IFS=$'\t' read -r p v a s; do
         case "$s" in
             *'install ok installed'*) ;;
             *) continue ;;
         esac
         INV_PKG+=("$p"); INV_VER+=("$v"); INV_ARCH+=("$a"); INV_STATUS+=("$s")
-    done < <(dpkg-query -W -f='${Package}\x1f${Version}\x1f${Architecture}\x1f${Status}\n' 2>/dev/null)
+    done < <(dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\t${Status}\n' 2>/dev/null)
     log "Installed packages scanned: ${#INV_PKG[@]}"
 }
 
@@ -71,10 +71,18 @@ resolve_installed_status() {
         return 0
     fi
     # точный пакет = пакет кандидата (регистр независимо); иначе первый подходящий
-    local found_hit='' h
+    local found_hit='' h instl candl="${cand_pkg,,}"
     if [ -n "$cand_pkg" ]; then
         for h in $hits; do
-            if [ "${INV_PKG[$h],,}" = "${cand_pkg,,}" ]; then found_hit=$h; break; fi
+            instl="${INV_PKG[$h],,}"
+            if [ "$instl" = "$candl" ]; then found_hit=$h; break; fi
+            # имя пакета может нести локаль-суффикс (_ru_ru и т.п.) — сравниваем без него
+            if [[ "$instl" =~ ^(.*)_[a-z]{2,3}_[a-z]{2,3}$ ]]; then
+                if [ "${BASH_REMATCH[1]}" = "$candl" ]; then found_hit=$h; break; fi
+            fi
+            if [[ "$candl" =~ ^(.*)_[a-z]{2,3}_[a-z]{2,3}$ ]]; then
+                if [ "$instl" = "${BASH_REMATCH[1]}" ]; then found_hit=$h; break; fi
+            fi
         done
     fi
     if [ -z "$found_hit" ] && [ -n "$cand_pkg" ]; then
