@@ -118,7 +118,7 @@ check_product_dependencies() {
     deps_count=$(prod_deps_count "$idx")
     [ "$deps_count" -gt 0 ] || return 0
     [ ${#PRODUCT_DEPS[@]} -gt 0 ] || return 0
-    local drow d fields ok_req blocking texts=() has_block=0
+    local drow d fields ok_req blocking texts=() has_block=0 miss=()
     for drow in "${PRODUCT_DEPS[@]}"; do
         IFS=$'\x1f' read -ra d <<< "$drow"
         [ "${d[0]}" = "$id" ] || continue
@@ -142,13 +142,18 @@ check_product_dependencies() {
             texts+=("[OK] $desc (found: ${found:-present})")
         else
             texts+=("[ERROR] $desc not satisfied (found: ${found:-not installed}, min: ${minv:-any})")
-            [ "$blk" = '1' ] && has_block=1
+            [ "$blk" = '1' ] && { has_block=1; miss+=("${pkg}${minv:+ >= $minv}"); }
         fi
     done
     DEP_CHECK_TEXT[$idx]="$(printf '%s\n' "${texts[@]}")"
     if [ "$has_block" -eq 1 ]; then
+        local reason='Prerequisites not satisfied'
+        if [ ${#miss[@]} -gt 0 ]; then
+            reason="$reason: ${miss[*]}"
+        fi
         STATUS[$idx]='BLOCKED'
-        BLOCKED_REASON[$idx]='Prerequisites not satisfied'
+        BLOCKED_REASON[$idx]="$reason"
+        ERROR[$idx]="$reason"
     fi
 }
 

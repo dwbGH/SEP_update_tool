@@ -136,16 +136,34 @@ sudo bash Deploy.sh -s
 6. Выполнение по порядку `order` из манифеста:
    - перед обновлением/удалением останавливаются службы
      (`systemctl stop`) и матчинговые процессы (`pgrep` + `kill`);
+   - **переименование пакета**: если установленный пакет называется иначе,
+     чем пакет в `.deb` (например, `seplatform.hmi.charts-desktop` →
+     `seplatform.hmi.charts-desktop_ru_ru` в локализованных сборках), старый
+     пакет сначала снимается (`dpkg -r`, конфиги сохраняются), а новый
+     ставится с `--force-confdef`; при конфликте файлов с посторонним
+     пакетом выполняется один повтор с `--force-overwrite`;
    - установка: `dpkg -i <файл>` (или `apt-get install -y ./файл`, если
      `installWithApt=1`), затем проверка `dpkg-query` по `packagePattern`;
    - удаление: `dpkg -r <пакет>` (или `dpkg -P`, если `purgeOnUninstall=1`);
    - службы запускаются обратно (`systemctl start`), если юнит существует.
 7. Отчёт в каталог сессии: `Deployment.log` (общий лог) и `report.json`
-   (структурированный, с полями компонентов и счётчиками).
+   (структурированный, с полями компонентов и счётчиками). В `error`
+   попадает реальная причина сбоя из вывода dpkg, а не только код возврата.
 
 Каждая операция ограничена таймаутом (`installTimeoutSeconds`,
 `uninstallTimeoutSeconds`); по превышении — статус `ERROR` и переход к
 следующему компоненту (`continueOnComponentError`).
+
+### Предупреждение о недостающих компонентах
+
+После построения плана считаются компоненты со статусом `MISSING`,
+`NO_DEB` и `BLOCKED`. Если их больше, чем `missingWarnThreshold`
+(по умолчанию 3), выводится выделенный блок `!! ВНИМАНИЕ: НЕ УСТАНОВЛЕНО
+N КОМПОНЕНТОВ !!` со списком и причиной по каждому (для `BLOCKED` — имя
+недостающей зависимости), в `Deployment.log` пишется строка `NOT INSTALLED`,
+а в интерактивном режиме вопрос подтверждения меняется на
+`Continue (WARNING: N components are NOT installed)`. В итоговой сводке
+добавляется строка `Not installed at start`.
 
 ### Файлы конфигурации
 
@@ -166,6 +184,7 @@ sudo bash Deploy.sh -s
 | `requireRoot` | Требовать права root |
 | `installWithApt` | Ставить через `apt-get install -y ./файл` вместо `dpkg -i` |
 | `purgeOnUninstall` | Удалять через `dpkg -P` вместо `dpkg -r` |
+| `missingWarnThreshold` | Порог (по умолчанию 3) количества неустановленных компонентов, начиная с которого выводится громкое предупреждение |
 
 `manifest-linux.json` — список компонентов (id, displayName, group, required,
 `debPattern` — glob по имени файла, `packagePattern` — regex по имени пакета

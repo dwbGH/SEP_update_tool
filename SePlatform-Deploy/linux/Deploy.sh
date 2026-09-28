@@ -211,6 +211,67 @@ apply_status_from_deps
 declare -a INST_VER_ORIG=()
 for _x in "${!PRODUCTS[@]}"; do INST_VER_ORIG[$_x]="${INST_VER[$_x]}"; done
 
+# вендорские переименования пакетов: pkg -> pkg_ru_ru (локализованные сборки)
+# dpkg считает такой .deb новым пакетом и отказывается перезаписывать файлы старого,
+# поэтому перед установкой старый пакет-владелец нужно снять
+declare -a PREV_PKG=()
+MISSING_COUNT=0
+MISSING_WARN_LOGGED=0
+declare -a MISSING_ROWS=()
+mark_renames() {
+    local idx
+    for idx in "${!PRODUCTS[@]}"; do
+        PREV_PKG[$idx]=''
+        if [ "${STATUS[$idx]}" = 'UPDATE' ] && [ -n "${INST_PKG[$idx]}" ] && [ -n "${CAND_PKG[$idx]}" ] &&
+            [ "${INST_PKG[$idx],,}" != "${CAND_PKG[$idx],,}" ]; then
+            PREV_PKG[$idx]="${INST_PKG[$idx]}"
+        fi
+    done
+}
+mark_renames
+
+collect_not_installed() {
+    local idx
+    MISSING_COUNT=0
+    MISSING_ROWS=()
+    for idx in "${!PRODUCTS[@]}"; do
+        case "${STATUS[$idx]}" in
+            MISSING | NO_DEB)
+                MISSING_COUNT=$((MISSING_COUNT + 1))
+                MISSING_ROWS+=("  [${STATUS[$idx]}] $(prod_val "$idx" 1)  (candidate: ${CAND_VER[$idx]:-no .deb in source})")
+                ;;
+            BLOCKED)
+                MISSING_COUNT=$((MISSING_COUNT + 1))
+                MISSING_ROWS+=("  [BLOCKED] $(prod_val "$idx" 1)  -  ${BLOCKED_REASON[$idx]}")
+                ;;
+        esac
+    done
+}
+
+# громкое предупреждение, если не установлено больше порога компонентов
+show_missing_warning() {
+    local thr="$1"
+    [ "$MISSING_COUNT" -gt "$thr" ] || return 0
+    say ''
+    say '=================================================='
+    say "  !! ВНИМАНИЕ: НЕ УСТАНОВЛЕНО $MISSING_COUNT КОМПОНЕНТОВ !!"
+    say "     (порог предупреждения: $thr)"
+    say '=================================================='
+    printf '%s\n' "${MISSING_ROWS[@]}"
+    say ''
+    say 'Эти компоненты НЕ будут установлены и останутся в прежней версии.'
+    say 'Установите недостающие системные пакеты и повторите развёртывание'
+    say 'в режиме [2] (install and update), либо выберите [1], чтобы обновить'
+    say 'только то, что уже установлено.'
+    say ''
+    if [ "${MISSING_WARN_LOGGED:-0}" != '1' ]; then
+        MISSING_WARN_LOGGED=1
+        local joined
+        joined=$(printf '%s\n' "${MISSING_ROWS[@]}" | tr -s ' ' | tr '\n' ';')
+        warn "NOT INSTALLED: $MISSING_COUNT of ${#PRODUCTS[@]} components (threshold $thr): ${joined%;}"
+    fi
+}
+
 # ---------- план ----------
 
 build_report_rows() {
@@ -218,11 +279,11 @@ build_report_rows() {
     local idx
     for idx in "${!PRODUCTS[@]}"; do
         local f
-        f=$(printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s' \
+        f=$(printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s' \
             "$(prod_val "$idx" 0)" "$(prod_val "$idx" 1)" "${STATUS[$idx]}" \
             "${INST_PKG[$idx]}" "${INST_VER_ORIG[$idx]}" "${CAND_VER[$idx]}" \
             "${CAND_BASE[$idx]}" "${INSTALL_EXIT[$idx]:-}" "${UNINSTALL_EXIT[$idx]:-}" \
-            "${VERIFIED_OK[$idx]:-0}" "${ERROR[$idx]}")
+            "${VERIFIED_OK[$idx]:-0}" "${ERROR[$idx]}" "${PREV_PKG[$idx]:-}")
         REPORT_ROWS+=("$f")
     done
 }
@@ -248,6 +309,7 @@ show_summary() {
     printf 'Uninstalled: %s\n' "$CountUninstalled"
     printf 'Skipped:   %s\n' "$CountSkipped"
     printf 'Failed:    %s\n' "$CountFailed"
+    printf 'Not installed at start: %s\n' "$MISSING_COUNT"
     say ''
     local idx
     for idx in "${!PRODUCTS[@]}"; do
@@ -302,6 +364,10 @@ show_plan() {
             BLOCKED) printf '%s %s\n           %s\n' "$tag" "$name" "${BLOCKED_REASON[$idx]}" ;;
             *) printf '%s %s\n' "$tag" "$name" ;;
         esac
+        if [ -n "${PREV_PKG[$idx]}" ]; then
+            printf '           package renamed: %s -> %s (old package removed first)\n' \
+                "${PREV_PKG[$idx]}" "${CAND_PKG[$idx]}"
+        fi
         lines=$((lines + 1))
     done
     [ "$lines" -gt 0 ] || say '  Nothing to do.'
@@ -315,6 +381,10 @@ show_plan() {
 }
 
 show_plan
+
+collect_not_installed
+MISSING_WARN=$(cfg_int missingWarnThreshold 3)
+show_missing_warning "$MISSING_WARN"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     log 'Dry run: no changes were made'
@@ -433,7 +503,14 @@ fi
 if [ "${#DO_IX[@]}" -gt 0 ]; then
     if [ "$AUTO_APPROVE" -eq 0 ] && [ "$NON_INTERACTIVE" -eq 0 ]; then
         say '================================'
-        if ! ask_yes_no 'Continue'; then
+        if [ "$MISSING_COUNT" -gt "$MISSING_WARN" ]; then
+            show_missing_warning "$MISSING_WARN"
+        fi
+        confirm_msg='Continue'
+        if [ "$MISSING_COUNT" -gt 0 ]; then
+            confirm_msg="Continue (WARNING: $MISSING_COUNT components are NOT installed)"
+        fi
+        if ! ask_yes_no "$confirm_msg"; then
             log 'Deployment aborted by user'
             build_report_rows
             emit_report "$EXIT_ABORTED" 'ABORTED'
@@ -481,10 +558,40 @@ run_install() {
     fi
     file="${CAND_PATH[$idx]}"
     plog="$SESSION_DIR/$id-install.log"
-    dpkg_install_file "$file" "$plog" "${CFG['installTimeoutSeconds']:-1800}"
+
+    # переименование пакета вендором (pkg -> pkg_ru_ru в локализованных сборках):
+    # для dpkg это новый пакет, поэтому он отказывается перезаписывать файлы
+    # старого. Снимаем старый пакет-владелец, оставляя конфиги (dpkg -r).
+    local -a dpkg_extra=()
+    if [ -n "${PREV_PKG[$idx]:-}" ]; then
+        say "  [i] package renamed: ${PREV_PKG[$idx]} -> ${CAND_PKG[$idx]}"
+        log "Package renamed: ${PREV_PKG[$idx]} -> ${CAND_PKG[$idx]}; removing previous owner before install"
+        if dpkg_remove_package "${PREV_PKG[$idx]}" "$plog" "${CFG['uninstallTimeoutSeconds']:-600}" remove; then
+            log "Previous package removed: ${PREV_PKG[$idx]}"
+        else
+            warn "cannot remove previous package ${PREV_PKG[$idx]}: install may fail on file conflicts"
+            say "  [!] previous package ${PREV_PKG[$idx]} was NOT removed cleanly"
+        fi
+        # оставшиеся conffiles от старого пакета не должны блокировать установку
+        dpkg_extra=(--force-confdef)
+    fi
+
+    dpkg_install_file "$file" "$plog" "${CFG['installTimeoutSeconds']:-1800}" \
+        ${dpkg_extra[@]+"${dpkg_extra[@]}"}
     rc=$?
     INSTALL_EXIT[$idx]=$rc
     append_to_log "$plog" "dpkg install exit code: $rc"
+
+    # конфликт файлов с другим пакетом: повтор с --force-overwrite
+    if [ "$rc" -ne 0 ] && deb_install_conflict "$plog"; then
+        warn "$name: file conflict while unpacking, retrying with --force-overwrite"
+        say "  [i] file conflict, retry with --force-overwrite"
+        dpkg_install_file "$file" "$plog" "${CFG['installTimeoutSeconds']:-1800}" \
+            ${dpkg_extra[@]+"${dpkg_extra[@]}"} --force-overwrite
+        rc=$?
+        INSTALL_EXIT[$idx]=$rc
+        append_to_log "$plog" "dpkg install --force-overwrite exit code: $rc"
+    fi
 
     if [ "$rc" -eq 0 ]; then
         if verify_installed "$idx"; then
@@ -497,7 +604,10 @@ run_install() {
             say "  [ERROR] ${ERROR[$idx]}"
         fi
     else
-        STATUS[$idx]='ERROR'; ERROR[$idx]="dpkg install failed with exit code $rc"
+        local reason
+        reason=$(deb_log_error_summary "$plog")
+        STATUS[$idx]='ERROR'
+        ERROR[$idx]="dpkg install failed with exit code $rc${reason:+: $reason}"
         CountFailed=$((CountFailed + 1))
         say "  [FAIL] ${ERROR[$idx]}"
     fi

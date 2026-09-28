@@ -12,5 +12,6 @@
   "continueOnComponentError": true,
   "requireRoot": true,
   "installWithApt": false,
-  "purgeOnUninstall": false
+  "purgeOnUninstall": false,
+  "missingWarnThreshold": 3
 }

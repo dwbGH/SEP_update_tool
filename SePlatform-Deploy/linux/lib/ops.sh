@@ -68,15 +68,17 @@ stop_processes() {
 }
 
 dpkg_install_file() {
-    # dpkg_install_file FILE LOG SECONDS  -> install exit code
-    local file="$1" plog="$2" sec="$3" rc=0 mode
-    mode='dpkg'
+    # dpkg_install_file FILE LOG SECONDS [EXTRA_DPKG_ARGS...]  -> install exit code
+    local file="$1" plog="$2" sec="$3"
+    shift 3
+    local rc=0 mode='dpkg'
     if [ "$(cfg_bool installWithApt 0)" = '1' ]; then
         mode='apt'
         run_timed "$sec" "$plog" apt-get install -y "./$file"
         rc=$?
     else
-        run_timed "$sec" "$plog" dpkg -i "$file"
+        [ $# -eq 0 ] || mode="dpkg $*"
+        run_timed "$sec" "$plog" dpkg -i "$@" "$file"
         rc=$?
     fi
     if [ "$rc" = '124' ]; then
@@ -86,12 +88,20 @@ dpkg_install_file() {
 }
 
 dpkg_remove_package() {
-    # dpkg_remove_package PKG LOG SECONDS  -> remove exit code
-    local pkg="$1" plog="$2" sec="$3" rc=0 op='remove'
-    if [ "$(cfg_bool purgeOnUninstall 0)" = '1' ]; then
-        op='purge'
+    # dpkg_remove_package PKG LOG SECONDS [OP]  -> remove exit code
+    # OP: remove | purge (по умолчанию из purgeOnUninstall)
+    local pkg="$1" plog="$2" sec="$3" op="${4:-}" rc=0
+    if [ -z "$op" ]; then
+        if [ "$(cfg_bool purgeOnUninstall 0)" = '1' ]; then
+            op='purge'
+        else
+            op='remove'
+        fi
+    fi
+    if [ "$op" = 'purge' ]; then
         run_timed "$sec" "$plog" dpkg -P "$pkg"
     else
+        op='remove'
         run_timed "$sec" "$plog" dpkg -r "$pkg"
     fi
     rc=$?
@@ -99,6 +109,26 @@ dpkg_remove_package() {
         printf '%s [ERROR] %s timed out\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$op" >> "$plog"
     fi
     return "$rc"
+}
+
+deb_install_conflict() {
+    # deb_install_conflict LOGFILE -> 0, если dpkg упёрся в конфликт файлов/пакетов
+    local plog="$1"
+    [ -f "$plog" ] || return 1
+    grep -qiE 'trying to overwrite|попытка перезаписать|conflicting packages|конфликтующ(ие|их) пакет' "$plog"
+}
+
+deb_log_error_summary() {
+    # deb_log_error_summary LOGFILE -> краткая причина сбоя одной строкой (или пусто)
+    local plog="$1" line=''
+    [ -f "$plog" ] || return 0
+    # сначала самая информативная строка — конфликт файлов/пакетов
+    line=$(grep -iE 'trying to overwrite|попытка перезаписать|conflicting packages' "$plog" 2>/dev/null | head -n1)
+    [ -n "$line" ] || line=$(grep -iE '(^|[[:space:]])(ошибка|error)' "$plog" 2>/dev/null | head -n1)
+    [ -n "$line" ] || line=$(grep -iE '^(dpkg|dpkg-deb|apt-get|apt)' "$plog" 2>/dev/null | tail -n1)
+    [ -n "$line" ] || return 0
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    printf '%s' "${line:0:240}"
 }
 
 # потоки для записи отдельного лога компонента

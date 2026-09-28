@@ -95,6 +95,16 @@ cfg_bool() {
     esac
 }
 
+# cfg_int KEY DEFAULT -> печатает целое значение (некорректное -> DEFAULT)
+cfg_int() {
+    local key="$1" dflt="$2" v
+    v="${CFG[$key]:-$dflt}"
+    case "$v" in
+        '' | *[!0-9]*) echo "$dflt" ;;
+        *) echo "$v" ;;
+    esac
+}
+
 load_config() {
     # load_config FILE — заполняет ассоциативный массив CFG
     local file="$1" k
@@ -102,7 +112,7 @@ load_config() {
     CFG['config']="$file"
     for k in defaultArchive logRoot tempRoot installTimeoutSeconds uninstallTimeoutSeconds \
              keepTempOnError cleanupTempOnSuccess warnOnNewerVersion continueOnComponentError \
-             requireRoot installWithApt purgeOnUninstall; do
+             requireRoot installWithApt purgeOnUninstall missingWarnThreshold; do
         CFG[$k]=$(get_json_string "$file" "$k")
     done
     CFG['localePreference']=$(get_json_list "$file" localePreference)
@@ -212,7 +222,8 @@ for line in open(rows_file, encoding='utf-8'):
         'id': f[0], 'displayName': f[1], 'status': f[2],
         'package': f[3], 'oldVersion': f[4], 'newVersion': f[5],
         'installFile': f[6], 'installExitCode': f[7],
-        'uninstallExitCode': f[8], 'verified': f[9] == '1', 'error': f[10]
+        'uninstallExitCode': f[8], 'verified': f[9] == '1', 'error': f[10],
+        'previousPackage': f[11] if len(f) > 11 else ''
     })
 data={
   'manifestVersion': '1.0',
